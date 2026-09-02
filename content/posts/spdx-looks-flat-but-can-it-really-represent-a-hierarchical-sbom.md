@@ -5,7 +5,7 @@ title = 'SPDX looks Flat. But can it really represent a Hierarchical SBOM?'
 categories = ['Tools', 'Best Practices', 'Standards']
 tags = ['SBOM', 'sbomasm', 'SPDX', 'CycloneDX', 'Merge Strategies', 'Hierarchical Merge','SBOM Standards']
 author = 'Vivek Sahu'
-description = 'Exploring how SPDX relationship types `CONTAINS` and `DEPENDS_ON` can represent hierarchical SBOM semantics, and what we learned from the SPDX Implementors meeting about multi-format merge strategy parity.'
+description = 'Exploring how SPDX relationship types `CONTAINS` and `DEPENDS_ON` can represent hierarchical SBOM semantics, and what this means for multi-format merge strategies.'
 slug = 'spdx-looks-flat-but-can-it-really-represent-a-hierarchical-sbom'
 +++
 
@@ -13,26 +13,26 @@ Hey SBOM enthusiasts 👋,
 
 If you've been working with SBOMs for a while, you already know that merging multiple SBOMs isn't just about dumping all the components into one file.
 
-The real challenge is preserving the **semantics meaning of the merge strategies**.
+The real challenge is preserving the **semantics meaning of each merge strategy**.
 
 Are they dependencies?
 Are they sub-components of another component?
 Are they independent products being assembled together?
 Or are we simply trying to flatten everything into one unified component list?
 
-This is exactly why sbomasm supports multiple merge strategies. We previously discussed how [Hierarchical, Flat, Assembly, and Augment Merge work](/posts/understanding-sbomasm-merge-strategies/) and when each strategy makes sense. In particular, Hierarchical Merge allows each input SBOM to retain its own component hierarchy under a new root while preserving its dependency relationships.
+This is exactly why [sbomasm](https://github.com/interlynk-io/sbomasm) supports multiple merge strategies. We previously discussed how [Hierarchical, Flat, Assembly, and Augment Merge work](/posts/understanding-sbomasm-merge-strategies/) and when each strategy makes sense.
 
-But while implementing these strategies across SBOM formats, we ran into an interesting question:
+But when we look at different SBOM formats, an interesting question comes up:
 
-> Can we represent the same merge semantics in SPDX that we already represented for CycloneDX?
+> Can we represent the same merge semantics in SPDX that we can represent in CycloneDX?
 
 At first glance, SPDX makes this look difficult. And that's where things get interesting.
 
-## The Problem: CycloneDX has nesting. SPDX looks flat
+## The Problem: CycloneDX has nesting, SPDX looks flat
 
-Let's start with a simple example.
+Let's start with a simple example. Suppose we have two SBOMs.
 
-Imagine we have two SBOMs:
+One represents a frontend application:
 
 ```text
 SBOM A
@@ -40,7 +40,11 @@ SBOM A
     ├── React
     ├── Axios
     └── Nginx
+```
 
+And another represents a backend application:
+
+```text
 SBOM B
 └── Backend
     ├── Express
@@ -48,7 +52,7 @@ SBOM B
     └── JWT
 ```
 
-With a Hierarchical Merge, we want to produce something like:
+In CycloneDX, this hierarchy can be represented directly using nested `components[]`.
 
 ```text
 My Application
@@ -62,24 +66,33 @@ My Application
     └── JWT
 ```
 
-This is straightforward in CycloneDX because CycloneDX has an actual component hierarchy structure. Components can contain sub-components, so the structure itself tells us what belongs where. **But SPDX takes a different approach.**
+The structure itself tells us something important:
 
-In SPDX structurally, packages/elements are represented in a flat collection, and **relationships describe how those elements are connected**. SPDX defines relationship types such as `DEPENDS_ON`, `CONTAINS` ad many more to express different kinds of connections.
+- **React belongs under Frontend.**
+- **Express belongs under Backend.**
 
-So the SPDX packages representation looks more like flatten in structure:
+This is useful when performing a Hierarchical Merge because each input SBOM can remain a self-contained sub-tree under a new root.
+
+But SPDX looks different.
+
+Unlike CycloneDX, SPDX does not have a nested `components[]` structure telling us that React belongs under Frontend. Instead, SPDX represents the elements and their connections through **relationships**.
+
+So, structurally, the SPDX representation looks more like this:
 
 ```text
 Frontend
 React
 Axios
 Nginx
+
 Backend
 Express
 Mongoose
 JWT
 ```
 
-There is no nested `components[]` unlike CycloneDX tree telling us that React belongs underneath Frontend. Instead in SPDX, we need to derive that information from relationships. And that led us to an important question.
+The question is:
+> If SPDX is structurally flat, how do we represent the hierarchy?
 
 ## First Question: Can `CONTAINS` represent nesting?
 
@@ -89,269 +102,372 @@ The first question was about hierarchy itself. If SPDX doesn't support nesting s
 CONTAINS
 ```
 
-relationshipType to express that one element is a sub-component of another element?
+relationshipType to express that one element is a sub-component of another element? We asked this question in SPDX Implementors meetings.
 
 > The answer from the SPDX Implementors Meeting discussion was **yes**.
 
 The SPDX relationship model provides **CONTAINS** specifically for expressing containment relationships. In other words, while the SPDX document remains structurally flat, the relationship graph can express that one element contains another.
 
-So the below CycloneDX hierachy of sub-component:
+We can use it to express that one element contains another:
+
+```text
+Frontend ──CONTAINS──> React
+Frontend ──CONTAINS──> Axios
+Frontend ──CONTAINS──> Nginx
+```
+
+Similarly:
+
+```text
+Backend ──CONTAINS──> Express
+Backend ──CONTAINS──> Mangoos
+Backend ──CONTAINS──> JWT
+```
+
+Now we have a way to represent the hierarchy.
+
+The SPDX document may still be structurally flat, but the relationships tell us how the elements are connected.
+
+So instead of the structure itself telling us:
 
 ```text
 Frontend
 └── React
 ```
 
-can equivalently represent the same semantic relationship in SPDX as:
+the relationship tells us:
 
 ```text
 Frontend ──CONTAINS──> React
 ```
 
-And:
+This gives us the first answer:
+> **Yes, SPDX can represent nesting semantics using the `CONTAINS` relationship.**
 
-```text
-Backend ──CONTAINS──> Express
-```
+But there is another question. And this one is more interesting.
 
-This gives us the first piece of the puzzle. But we still had another question.
-
-## The more interesting Question: Can two Relationships co-exist?
+## The more interesting Question: Can Multiple Relationships co-exist for same element?
 
 Now consider a real software dependency graph. A component can have more than one semantic relationship with another component.
 
-**For example**, suppose React is a component contained inside Frontend, and Frontend also depends on React. We may want to express both facts:
+**For example**, Suppose React is contained inside Frontend. At the same time, React is also a dependency of Frontend. We therefore have two different pieces of information:
 
 ```text
 Frontend ──CONTAINS──> React
 Frontend ──DEPENDS_ON──> React
 ```
 
-These relationships are not saying the same thing.
+Is that valid?
 
-- **CONTAINS** tells us about structure: React is part of the Frontend component hierarchy.
+The important thing here is that these two relationships describe **different semantics**.
 
-- **DEPENDS_ON** tells us about dependency semantics: Frontend depends on React.
+`CONTAINS` answers:
+> **Where does this component belong?**
 
-So the question we raised with the SPDX Implementors community was whether SPDX allows these two relationship types to co-exist between the same source and target.
+While `DEPENDS_ON` answers:
+> **What does this component depend on?**
+
+**NOTE**:
+This question we raised with the SPDX Implementors community was whether SPDX allows these two relationship types to co-exist between the same source and target.
 
 > The conclusion from the Implementors discussion was **yes**.
 
-And that was the second piece of the puzzle.
-
-## Now let's connect the dots...
-
-Once these two questions were resolved, the problem started looking very different. We originally thought:
-
-> SPDX is flat, so hierarchical merging may not be possible in the same way as CycloneDX.
-
-But now we can look at it differently. **SPDX may be structurally flat**, but its **relationship model is rich** enough to express the connections b/w different elements.
+So the same pair of elements can have different relationships describing different connections.
 
 **For example**:
 
 ```text
-                 My Application
-                       |
-                  DEPENDS_ON
-                 /         \
-                /           \
-          Frontend         Backend
-             |                |
-          CONTAINS          CONTAINS
-             |                |
-           React           Express
-             |                |
-          DEPENDS_ON       DEPENDS_ON
+Frontend
+   │
+   ├── CONTAINS ──────> React
+   │
+   └── DEPENDS_ON ────> React
 ```
 
-The physical document is still flat. But the semantic model isn't. The hierarchy or strucutre is represented using **CONTAINS**. The dependency graph is represented using **DEPENDS_ON**. And both relationships can co-exist when they describe different semantics between the same elements.
+The first relationship tells us about the component's place in the hierarchy. The second tells us about the dependency relationship. This distinction is important because **hierarchy and dependency are not necessarily the same thing**.
 
-That is the key insight.
+A component can belong to an application **and** be a dependency of that application.
+
+Once we understand this, the pieces start to come together.
+
+## Connecting the Dots
+
+So far, we have established two things:
+
+1. `CONTAINS` can represent the relationship between a parent element and a contained element.
+2. `CONTAINS` and `DEPENDS_ON` can represent different semantics between the same elements.
+
+But how do these two capabilities help us reproduce the behavior of **Hierarchical Merge**?
+
+Let's go back to our example.
+
+We want to merge:
+
+```text
+Frontend
+├── React
+└── Axios
+
+Backend
+├── Express
+└── Mangoos
+```
+
+
+into:
+
+```text
+Application
+├── Frontend
+│   ├── React
+│   └── Axios
+│
+└── Backend
+    ├── Express
+    └── Mangoos
+```
+
+In CycloneDX, the hierarchy is represented directly through nested components.
+
+In SPDX, we can represent the same semantics through relationships:
+
+
+```text
+Application
+   │
+   ├── DEPENDS_ON ──> Frontend
+   │                     │
+   │                     ├── CONTAINS ──> React
+   │                     └── CONTAINS ──> Axios
+   │
+   └── DEPENDS_ON ──> Backend
+                         │
+                         ├── CONTAINS ──> Express
+                         └── CONTAINS ──> JSON Web Token
+```
+
+Now we can distinguish two different questions.
+
+
+**Where does a component belong?**
+
+```text
+CONTAINS
+```
+
+**What does a component depend on?**
+
+```text
+DEPENDS_ON
+```
+
+This is the key to representing Hierarchical Merge in SPDX.
 
 ## So what does this mean for Hierarchical Merge?
 
-Let's go back to our original example.
-
-We have:
+The goal of Hierarchical Merge is not simply to put all components into a new SBOM. The goal is to preserve the structure and dependency semantics of each input SBOM while bringing them under a new root. With CycloneDX, this can be represented using nested components:
 
 ```text
-SBOM A
-Frontend
+New Root
+├── Frontend
+│   ├── React
+│   └── Axios
+│
+└── Backend
+    ├── Express
+    └── Mangoos
+```
+
+With SPDX, we can express the same semantics using relationships:
+
+```text
+New Root
+   │
+   ├── DEPENDS_ON ──> Frontend
+   │                     │
+   │                     ├── CONTAINS ──> React
+   │                     └── CONTAINS ──> Axios
+   │
+   └── DEPENDS_ON ──> Backend
+                         │
+                         ├── CONTAINS ──> Express
+                         └── CONTAINS ──> JSON Web Token
+```
+
+The representation is different, but the **semantics should remain the same**. That's an important distinction when working with multiple SBOM formats. We don't necessarily need every format to represent the data in exactly the same structural way. What matters is whether the format can preserve the meaning we need.
+
+## What about the other merge strategies?
+
+Hierarchical Merge is where this relationship model becomes particularly interesting. But the same reasoning also helps us understand how the other merge strategies map to SPDX.
+
+### Assembly Merge
+
+In Assembly Merge, the primary components from the input SBOMs become components of a new root.
+
+For example:
+
+```text
+Application
+├── Frontend
+│   ├── React
+│   └── Axios
+│
+└── Backend
+    ├── Express
+    └── Mangoos
+```
+
+In SPDX, this can be represented using `CONTAINS` relationships:
+
+```text
+Application
+   │
+   ├── CONTAINS ──> Frontend
+   │
+   └── CONTAINS ──> Backend
+```
+
+The existing relationships inside Frontend and Backend can remain intact.
+
+So the root describes the assembly, while the existing relationships describe the contents and dependencies of each input SBOM.
+
+### Flat Merge
+
+Flat Merge is different. The goal here is to bring the components into a single flat representation while preserving the dependency relationships.
+
+Conceptually:
+
+```text
+Application
 ├── React
 ├── Axios
-└── Nginx
-```
-
-and:
-
-```text
-SBOM B
-Backend
 ├── Express
-├── Mongoose
-└── JWT
+└── Mangoos
 ```
 
-A Hierarchical Merge should **preserve the individual SBOM hierarchies while also preserving their dependency relationships**.
-
-- In CycloneDX, we can represent this directly using **nested components**.
-- In SPDX, we can represent the same semantics through **relationships** of type `CONTAINS`.
-
-**Conceptually**:
-
-```text
-Root
- |
- +── DEPENDS_ON ──> Frontend
- |                    |
- |                    +── CONTAINS ──> React
- |                    +── CONTAINS ──> Axios
- |                    +── CONTAINS ──> Nginx
- |
- +── DEPENDS_ON ──> Backend
-                      |
-                      +── CONTAINS ──> Express
-                      +── CONTAINS ──> Mongoose
-                      +── CONTAINS ──> JWT
-```
-
-And the original dependency relationships can continue to exist independently.
-
-**For example**:
+The hierarchy from the individual SBOMs is no longer the primary concern. Instead, the important information is the dependency graph:
 
 ```text
 Frontend ──DEPENDS_ON──> React
 Frontend ──DEPENDS_ON──> Axios
-Backend  ──DEPENDS_ON──> Express
+
+Backend ──DEPENDS_ON──> Express
+Backend ──DEPENDS_ON──> Mangoos
 ```
 
-Now we have both pieces of information:
+SPDX's relationship model fits naturally here because the dependency semantics can be represented using `DEPENDS_ON` relationships between elements.
 
-- Where does a component belong? -> **CONTAINS**
-- What does a component depends on? -> **DEPENDS_ON**
+## What this means for `sbomasm` ?
 
-This is exactly what we were trying to preserve with Hierarchical Merge.
+This also gives us a useful way to think about merge strategies across formats.
 
-## What about the other merge strategies?
+| Merge Strategy   | CycloneDX                               | SPDX                                                 |
+| ---------------- | --------------------------------------- | ---------------------------------------------------- |
+| **Hierarchical** | Nested components + dependencies        | `CONTAINS` + `DEPENDS_ON` relationships              |
+| **Assembly**     | Primary components nested under root    | Root `CONTAINS` primary components                   |
+| **Flat**         | Flattened components + dependency graph | Flat elements + preserved `DEPENDS_ON` relationships |
+| **Augment**      | Enrich existing SBOM                    | Enrich existing SBOM                                 |
 
-Once we understand this relationship-based model, the other merge strategies become easier to reason about too.
+The important part is not that the underlying representation is identical. It isn't. CycloneDX and SPDX model relationships differently.
 
-### Assembly Merge
+The important part is that `sbomasm` can preserve the **intent of the merge strategy** across formats. That's what multi-format SBOM tooling should aim for.
 
-Assembly Merge has a slightly different goal.
 
-Here, the primary components of input SBOMs become sub-components of the new root(i.e. new primary component), while the rest of the component information remains available at the appropriate level.
+## The Bigger Lesson: Flat structure doesn't mean Flat semantics
 
-In SPDX, that means the synthetic root can use:
-
-```text
-Root
-├── CONTAINS ──> Product A
-└── CONTAINS ──> Product B
-```
-
-This matches the semantic idea of an assembled collection rather than saying that the root itself depends on those products.
-
-### Flat Merge
-
-Flat Merge is different again. Here, we don't want to preserve the hierarchy. Everything is flattened. But we do want to preserve the dependency graph.
-
-So the important relationships are:
-
-```text
-Root
-├── DEPENDS_ON ──> Primary A
-└── DEPENDS_ON ──> Primary B
-
-Primary A
-└── DEPENDS_ON ──> A1
-
-A1
-└── DEPENDS_ON ──> A2
-
-Primary B
-└── DEPENDS_ON ──> B1
-```
-
-So the three strategies aren't simply different ways of moving packages around. They are different **semantic views** of the same underlying SBOM information.
-
-## The bigger lesson: Flat structure doesn't mean Flat semantics
-
-This was probably the most interesting part of this investigation for me.
-
-When we say:
+This is probably the most interesting takeaway from this whole exploration. When we first look at SPDX, it is easy to think:
 
 > "SPDX is flat."
 
-it is easy to interpret that as:
+And from there, it is tempting to conclude:
 
 > "SPDX cannot represent hierarchy."
 
-But those aren't the same thing.
+But those two statements are not the same. A format can be structurally flat while still representing rich relationships between its elements. Think about it this way:
 
-SPDX doesn't need a nested JSON structure to represent a hierarchy. It can represent that hierarchy through its relationship graph.
+```text
+CycloneDX
+    │
+    ├── Structure
+    │      └── Nested components
+    │
+    └── Relationships
+           └── Dependencies
+```
 
-Think about it this way.
+Whereas SPDX can be thought of more like:
 
-CycloneDX gives us:
+```text
+SPDX
+    │
+    ├── Elements
+    │
+    └── Relationships
+           ├── CONTAINS
+           ├── DEPENDS_ON
+           └── Other relationship types
+```
 
-- > Structure + Relationships
+CycloneDX gives us hierarchy directly through its structure. SPDX can express the same **semantics** through relationships. That is a subtle but important difference. It also shows why looking only at the document structure can sometimes be misleading. To understand what an SBOM actually means, we often need to look at both:
 
-while SPDX gives us:
+**What elements exist?**
 
-- > Elements + Relationships
+and
 
-The hierarchy in SPDX is therefore **derived from relationships** rather than encoded directly in the physical structure.
+**How are those elements related?**
 
-And because different relationship types carry different semantics, we can represent multiple dimensions of information without changing the underlying flat structure. That is what makes this approach possible.
+## SPDX doesn't have native component nesting
 
-## What this means for sbomasm tool ?
-
-This investigation gives us a clear direction for making the SPDX merge strategies consistent with their CycloneDX counterparts.
-
-The goal isn't to make the generated SPDX document look like a CycloneDX document. That's impossible — and unnecessary. The goal is to make sure that:
-
-> The same merge strategy carries the same semantic meaning regardless of the SBOM format.
-
-For sbomasm, that means:
-
-| Merge Strategy | CycloneDX | SPDX |
-|--------------|-----------|------|
-| Hierarchical | Nested components + dependencies | CONTAINS + DEPENDS_ON relationships |
-| Assembly | Primary components nested under root | Root CONTAINS primary components |
-| Flat | Flattened components + dependency graph | Flat elements + preserved DEPENDS_ON relationships |
-| Augment | Enrich existing SBOM | Enrich existing SBOM |
-
-The representation is different but semantics should not be. And that is the real objective behind the work.
-
-## One more important distinction
-
-There is one thing worth making absolutely clear.
-
-We should not say:
+There is one important distinction we should keep clear. We should **not** say:
 
 > "SPDX supports native component nesting."
 
-It doesn't work that way.
+It doesn't have structural nesting in the same way CycloneDX does. Instead, the more accurate statement is:
 
-SPDX remains a **relationship-driven** model. The elements themselves are not physically nested in the document in the way CycloneDX components can be nested.
+> **SPDX does not have structural nesting like CycloneDX, but its relationship model can represent nesting semantics through `CONTAINS`.**
 
-A more accurate statement is:
+This distinction matters because the two formats are still structurally different. For example, CycloneDX can represent:
 
-> SPDX does not have structural nesting like CycloneDX, but its relationship model can represent nesting semantics through CONTAINS relationship type.
+```text
+Application
+└── Frontend
+    └── React
+```
 
-That's a subtle distinction, but an important one. 
+directly through nested component structures.
 
-## Wrapping Up...
+SPDX represents the same relationship through:
 
-What started as a small inconsistency between SPDX and CycloneDX merge strategies turned into a much more interesting question about how SBOM formats represent relationships. CycloneDX makes hierarchy explicit through its component structure, whereas SPDX takes a different approach.
+```text
+Application ──CONTAINS──> Frontend
+Frontend ──CONTAINS──> React
+```
 
-Its structure is flat, but its relationship model provides the vocabulary needed to describe how those elements relate to one another.
+The data model is different. The semantics can still be preserved.
 
-And once we understood that:
+## Wrapping Up
 
-- **CONTAINS** → structural relationship
-- **DEPENDS_ON** → dependency relationship
+What started as a question about how to represent merge strategies across SPDX and CycloneDX turned into a much more interesting exploration of how SBOM formats represent relationships.
+
+The key takeaway is simple:
+
+**SPDX may be structurally flat, but that doesn't make its semantics flat.**
+
+With `CONTAINS`, we can represent the relationship between an element and the elements it contains.
+
+With `DEPENDS_ON`, we can represent dependency semantics.
+
+And because these relationships describe different aspects of the model, they can work together to preserve both hierarchy and dependencies. This is especially useful for Hierarchical Merge. CycloneDX can represent the hierarchy directly through nested components. SPDX can represent the same hierarchy through `CONTAINS` relationships while continuing to represent dependency information through `DEPENDS_ON`.
+
+So when working with multiple SBOM formats, the goal shouldn't be:
+
+> **"Can every format represent the data in exactly the same way?"**
+
+A better question is:
+
+> **"Can every format preserve the same meaning?"**
+
+That is the real challenge in multi-format SBOM tooling. And sometimes, what looks like a limitation at first turns out to be simply a different way of expressing the same idea.
 
 ## Resources
 
