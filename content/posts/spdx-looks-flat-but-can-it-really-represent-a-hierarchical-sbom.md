@@ -73,7 +73,7 @@ The structure itself tells us something important:
 
 This is useful when performing a Hierarchical Merge because each input SBOM can remain a self-contained sub-tree under a new root.
 
-But SPDX looks different.
+**But SPDX looks different.**
 
 Unlike CycloneDX, SPDX does not have a nested `components[]` structure telling us that React belongs under Frontend. Instead, SPDX represents the elements and their connections through **relationships**.
 
@@ -120,7 +120,7 @@ Similarly:
 
 ```text
 Backend ──CONTAINS──> Express
-Backend ──CONTAINS──> Mangoos
+Backend ──CONTAINS──> Mongoose
 Backend ──CONTAINS──> JWT
 ```
 
@@ -146,7 +146,7 @@ This gives us the first answer:
 
 But there is another question. And this one is more interesting.
 
-## The more interesting Question: Can Multiple Relationships co-exist for same element?
+## The more interesting Question: Can multiple relationships co-exist for same element?
 
 Now consider a real software dependency graph. A component can have more than one semantic relationship with another component.
 
@@ -190,7 +190,7 @@ A component can belong to an application **and** be a dependency of that applica
 
 Once we understand this, the pieces start to come together.
 
-## Connecting the Dots
+## Connecting the dots
 
 So far, we have established two things:
 
@@ -210,7 +210,7 @@ Frontend
 
 Backend
 ├── Express
-└── Mangoos
+└── Mongoose
 ```
 
 
@@ -224,7 +224,7 @@ Application
 │
 └── Backend
     ├── Express
-    └── Mangoos
+    └── Mongoose
 ```
 
 In CycloneDX, the hierarchy is represented directly through nested components.
@@ -275,7 +275,7 @@ New Root
 │
 └── Backend
     ├── Express
-    └── Mangoos
+    └── Mongoose
 ```
 
 With SPDX, we can express the same semantics using relationships:
@@ -314,7 +314,7 @@ Application
 │
 └── Backend
     ├── Express
-    └── Mangoos
+    └── Mongoose
 ```
 
 In SPDX, this can be represented using `CONTAINS` relationships:
@@ -342,7 +342,7 @@ Application
 ├── React
 ├── Axios
 ├── Express
-└── Mangoos
+└── Mongoose
 ```
 
 The hierarchy from the individual SBOMs is no longer the primary concern. Instead, the important information is the dependency graph:
@@ -352,7 +352,7 @@ Frontend ──DEPENDS_ON──> React
 Frontend ──DEPENDS_ON──> Axios
 
 Backend ──DEPENDS_ON──> Express
-Backend ──DEPENDS_ON──> Mangoos
+Backend ──DEPENDS_ON──> Mongoose
 ```
 
 SPDX's relationship model fits naturally here because the dependency semantics can be represented using `DEPENDS_ON` relationships between elements.
